@@ -1,0 +1,16 @@
+[
+  {
+    "name": "acc1",
+    "key": "2gtkoeiz40sz1u6um7uq0v4p0nvdvh",
+    "sub_id": "26113",
+    "proxy": "host:port:user:pass",
+    "claims": 5
+  },
+  {
+    "name": "acc2",
+    "key": "YOUR_PUBLISHER_KEY",
+    "sub_id": "12345",
+    "proxy": null,
+    "claims": 3
+  }
+]

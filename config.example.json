@@ -1,0 +1,18 @@
+{
+  "vernuable_key": "YOUR_VERNUABLE_API_KEY",
+  "vernuable_base": "https://vernuable.my.id",
+  "solve_timeout": 180,
+  "poll_interval": 2,
+  "workers": 2,
+  "claims_per_account": 5,
+  "delay_min": 2,
+  "delay_max": 5,
+  "default_proxy": null,
+  "log_level": "INFO",
+  "debug": false,
+  "smart_claim": {
+    "prefer_boosted": true,
+    "min_reward": 1,
+    "max_duration": 25
+  }
+}

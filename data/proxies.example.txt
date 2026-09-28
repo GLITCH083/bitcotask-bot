@@ -1,0 +1,4 @@
+# One proxy per line (optional — can also set per-account in accounts.json)
+# host:port:user:pass
+# http://user:pass@host:port
+166.88.238.42:6022:gidxtliz:gnn24pmu5ecy
