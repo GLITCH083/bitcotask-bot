@@ -1,12 +1,10 @@
 {
-  "version": "1.4.4",
+  "version": "1.4.5",
   "name": "VernuableOfficialScripts",
   "whats_new": [
-    "Auto-heal on run: dynamic validate field from JS (not hardcoded UEjS)",
-    "Auto-heal: remove false-accept when random hex found",
-    "Update cleans junk: patch_*.php, *.part*.b64, temp_update",
-    "Menu: Clean junk files + hide patch scripts from Offerwall",
-    "SuccKey=true cases now POST correct field name for validate"
+    "SINGLE plain bitcotasks.com.php — NO parts, NO gzdecode",
+    "Dynamic validate field from captcha JS",
+    "Update + Clean junk removes patch_*.php and *.b64"
   ],
   "updated": "2026-09-29",
   "repo": "GLITCH083/bitcotask-bot"
