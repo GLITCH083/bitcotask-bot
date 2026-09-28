@@ -15,8 +15,6 @@ define("UPDATE_FILES", [
     "bot.php", "version.json",
     "functions/function.php", "functions/vernuable.php",
     "scripts/offerwall/bitcotasks.com.php",
-    "scripts/offerwall/bitcotasks.part1.b64",
-    "scripts/offerwall/bitcotasks.part2.b64",
 ]);
 date_default_timezone_set("Asia/Karachi");
 enableCtrlC();
@@ -72,8 +70,33 @@ function deleteDirectory($dir) {
     @rmdir($dir);
 }
 
+function cleanupJunk() {
+    $n = 0;
+    $patterns = [
+        SCRIPTS_DIR . "/*/patch_*.php",
+        SCRIPTS_DIR . "/*/*.part*.b64",
+        SCRIPTS_DIR . "/*/*.full.b64",
+        BASE_DIR . "/bot.b64.*",
+        BASE_DIR . "/bot.php.bak",
+    ];
+    foreach ($patterns as $pat) {
+        foreach (glob($pat) as $f) {
+            if (is_file($f) && @unlink($f)) {
+                echo "  removed " . str_replace(BASE_DIR . DIRECTORY_SEPARATOR, "", $f) . "\n";
+                $n++;
+            }
+        }
+    }
+    if (is_dir(TEMP_DIR)) {
+        deleteDirectory(TEMP_DIR);
+        echo "  removed temp_update/\n";
+        $n++;
+    }
+    return $n;
+}
+
 function applyUpdate($latest) {
-    echo "\n" . YELLOW . "Downloading update files (raw.githubusercontent)...\n" . RESET;
+    echo "\n" . YELLOW . "Downloading update files...\n" . RESET;
     if (is_dir(TEMP_DIR)) deleteDirectory(TEMP_DIR);
     mkdir(TEMP_DIR, 0777, true);
     $n = 0;
@@ -85,11 +108,11 @@ function applyUpdate($latest) {
         $dir = dirname($tmp);
         if (!is_dir($dir)) mkdir($dir, 0777, true);
         file_put_contents($tmp, $content);
-        echo GREEN . "ok\n" . RESET;
+        echo GREEN . "ok (" . strlen($content) . ")\n" . RESET;
         $n++;
     }
     if ($n == 0) {
-        echo RED . "No files downloaded. Use: git pull origin vernuable-officialscripts\n" . RESET;
+        echo RED . "No files downloaded.\n" . RESET;
         deleteDirectory(TEMP_DIR);
         return false;
     }
@@ -101,13 +124,15 @@ function applyUpdate($latest) {
         $dest = BASE_DIR . "/" . $file;
         $dir = dirname($dest);
         if (!is_dir($dir)) mkdir($dir, 0777, true);
-        if (rename($tmp, $dest)) {
+        if (@rename($tmp, $dest) || (@copy($tmp, $dest) && @unlink($tmp))) {
             echo "  updated $file\n";
             $applied++;
         }
     }
     deleteDirectory(TEMP_DIR);
-    echo GREEN . "Done ($applied files). Restart bot.\n" . RESET;
+    echo YELLOW . "Cleaning junk...\n" . RESET;
+    $cn = cleanupJunk();
+    echo GREEN . "Done ($applied files, $cn junk removed). Restart bot.\n" . RESET;
     return true;
 }
 
@@ -118,7 +143,6 @@ function checkForUpdates() {
     $lat = fetchLatestVersion();
     if (!$lat) {
         echo RED . "Could not fetch version.json\n" . RESET;
-        echo GREY . "Fallback: git pull origin vernuable-officialscripts\n" . RESET;
         echo WHITE . "Press Enter..." . RESET; fgets(STDIN); return;
     }
     echo "  Latest:  " . $lat["version"] . "\n";
@@ -137,22 +161,81 @@ function checkForUpdates() {
 function getScripts() {
     $out = [];
     if (!is_dir(SCRIPTS_DIR)) return $out;
+    $skip = ["patch_", "boot", "loader", "restore"];
     foreach (glob(SCRIPTS_DIR . "/*", GLOB_ONLYDIR) as $dir) {
         $cat = basename($dir);
         foreach (glob($dir . "/*.php") as $file) {
-            $out[] = ["file" => $file, "basename" => basename($file), "category" => $cat,
-                "description" => "BitcoTasks offerwall"];
+            $base = basename($file);
+            $low = strtolower($base);
+            $bad = false;
+            foreach ($skip as $s) if (strpos($low, $s) !== false) { $bad = true; break; }
+            if ($bad) continue;
+            $out[] = ["file" => $file, "basename" => $base, "category" => $cat, "description" => "offerwall"];
         }
     }
     return $out;
+}
+
+function healBitcotasks($script) {
+    if (!is_file($script)) return;
+    $b = file_get_contents($script);
+    $changed = false;
+    $nb = preg_replace('/if\s*\(\s*!\$ok\s*&&\s*\$token\s*\)\s*\$ok\s*=\s*true\s*;/', '// strict: no false accept', $b);
+    if ($nb !== null && $nb !== $b) { $b = $nb; $changed = true; }
+    if (strpos($b, 'validate_field') === false && strpos($b, 'function parseCaptchaJs') !== false) {
+        $inj = "    \$out[\"validate_field\"] = \"UEjS\";\n"
+             . "    if (preg_match('#getElementById\\\\(\\\\s*[\"\\']([A-Za-z0-9_]+)[\"\\']\\\\s*\\\\)\\\\s*\\\\.\\\\s*value\\\\s*=\\\\s*response\\\\.([A-Za-z0-9_]+)#', \$js, \$m)) {\n"
+             . "        \$out[\"validate_field\"] = \$m[1];\n"
+             . "        \$out[\"token_key\"] = \$m[2];\n"
+             . "    }\n";
+        $b2 = preg_replace('/(\n\s*)(return \$out;\s*\n\})/', "\n" . $inj . "$1$2", $b, 1);
+        if ($b2 !== null && $b2 !== $b) { $b = $b2; $changed = true; }
+    }
+    if (strpos($b, 'validate_field') !== false) {
+        $nb = str_replace(
+            '"action=validate&UEjS=" . rawurlencode($tryTok)',
+            '"action=validate&" . ($parsed["validate_field"] ?? "UEjS") . "=" . rawurlencode($tryTok)',
+            $b
+        );
+        $nb = str_replace(
+            '"action=validate&UEjS=" . rawurlencode($token)',
+            '"action=validate&" . ($parsed["validate_field"] ?? "UEjS") . "=" . rawurlencode($token)',
+            $nb
+        );
+        $nb = preg_replace(
+            '/action=validate&UEjS="\s*\.\s*rawurlencode\(/',
+            'action=validate&" . ($parsed["validate_field"] ?? "UEjS") . "=" . rawurlencode(',
+            $nb
+        );
+        if ($nb !== null && $nb !== $b) { $b = $nb; $changed = true; }
+    }
+    if (strpos($b, 'ValField') === false) {
+        $nb = str_replace(
+            'logLine("Click", GREEN . "accepted (strict)" . RESET);',
+            'logLine("Click", GREEN . "accepted (strict)" . RESET);\n        logLine("ValField", (string)($parsed["validate_field"] ?? "UEjS"));',
+            $b
+        );
+        if ($nb === $b) {
+            $nb = str_replace(
+                'logLine("Click", GREEN . "accepted" . RESET);',
+                'logLine("Click", GREEN . "accepted" . RESET);\n        logLine("ValField", (string)($parsed["validate_field"] ?? "UEjS"));',
+                $b
+            );
+        }
+        if ($nb !== $b) { $b = $nb; $changed = true; }
+    }
+    if ($changed) {
+        file_put_contents($script, $b);
+        echo YELLOW . "  [auto-heal] bitcotasks captcha/validate fixed\n" . RESET;
+    }
 }
 
 function showBanner() {
     $v = getCurrentVersion();
     $bal = "?";
     try {
-        $b = vernuable_balance();
-        if ($b !== null) $bal = "$" . number_format($b, 5);
+        $bb = vernuable_balance();
+        if ($bb !== null) $bal = "$" . number_format($bb, 5);
     } catch (Exception $e) {}
     echo "\n";
     echo CYAN . "╔══════════════════════════════════════════════════════════╗\n" . RESET;
@@ -172,29 +255,38 @@ function mainMenu() {
         $cats = [];
         foreach ($scripts as $s) $cats[$s["category"]] = true;
         $cats = array_keys($cats);
-        echo "\n" . WHITE . BOLD . "  MAIN MENU\n" . RESET;
-        echo GREY . "  ────────────────────────────────────────\n" . RESET;
-        $i = 1; $map = [];
-        foreach ($cats as $cat) {
-            $cnt = count(array_filter($scripts, function ($s) use ($cat) { return $s["category"] === $cat; }));
-            echo "  " . GREEN . "[$i]" . WHITE . "  " . ucwords($cat) . GREY . " ($cnt scripts)\n" . RESET;
-            $map[$i] = $cat; $i++;
+        $i = 1;
+        echo "\n  MAIN MENU\n  " . str_repeat("─", 40) . "\n";
+        $map = [];
+        foreach ($cats as $c) {
+            $cnt = count(array_filter($scripts, function ($s) use ($c) { return $s["category"] === $c; }));
+            echo "  " . GREEN . "[$i]" . WHITE . "  " . ucfirst($c) . " ($cnt scripts)\n" . RESET;
+            $map[$i] = $c;
+            $i++;
         }
         echo "  " . GREEN . "[$i]" . WHITE . "  Check for Updates\n" . RESET; $upd = $i; $i++;
-        echo "  " . GREEN . "[$i]" . WHITE . "  Vernuable balance / set API key\n" . RESET; $bal = $i;
+        echo "  " . GREEN . "[$i]" . WHITE . "  Vernuable balance / set API key\n" . RESET; $bal = $i; $i++;
+        echo "  " . GREEN . "[$i]" . WHITE . "  Clean junk files\n" . RESET; $cln = $i;
         echo "  " . GREEN . "[0]" . WHITE . "  Exit\n" . RESET;
         echo "\n" . YELLOW . "  › " . RESET;
         $choice = trim(fgets(STDIN));
         if ($choice === "0" || strtolower($choice) === "q") { echo "Bye.\n"; exit(0); }
         if ((int)$choice === $upd) { checkForUpdates(); continue; }
+        if ((int)$choice === $cln) {
+            echo "\n";
+            $n = cleanupJunk();
+            echo $n ? GREEN . "Removed $n item(s)\n" . RESET : "Nothing to clean.\n";
+            echo WHITE . "Press Enter..." . RESET; fgets(STDIN);
+            continue;
+        }
         if ((int)$choice === $bal) {
-            clearScreen(); showBanner();
-            $key = vernuable_key();
-            $masked = strlen($key) > 10 ? substr($key, 0, 6) . "…" . substr($key, -4) : $key;
-            echo "\n  API key: $masked\n";
-            $b = vernuable_balance();
-            echo $b !== null ? GREEN . "  Balance: $" . number_format($b, 5) . "\n" . RESET : RED . "  fail\n" . RESET;
-            echo WHITE . "Press Enter..." . RESET; fgets(STDIN); continue;
+            echo "\n";
+            $k = function_exists("vernuable_key") ? vernuable_key() : "";
+            echo "  Key: " . ($k ? substr($k, 0, 8) . "..." : "(not set)") . "\n";
+            $bb = vernuable_balance();
+            echo "  Balance: " . ($bb !== null ? "$" . number_format($bb, 5) : "error") . "\n";
+            echo WHITE . "Press Enter..." . RESET; fgets(STDIN);
+            continue;
         }
         $n = (int)$choice;
         if (!isset($map[$n])) continue;
@@ -204,7 +296,7 @@ function mainMenu() {
             clearScreen(); showBanner();
             echo "\n  " . strtoupper($cat) . "\n";
             foreach ($list as $j => $s) {
-                echo "  " . GREEN . "[" . ($j+1) . "]" . WHITE . "  " . $s["basename"] . "\n" . RESET;
+                echo "  " . GREEN . "[" . ($j + 1) . "]" . WHITE . "  " . $s["basename"] . "\n" . RESET;
             }
             echo "  " . GREEN . "[0]" . WHITE . "  Back\n" . RESET;
             echo "\n" . YELLOW . "  › " . RESET;
@@ -212,7 +304,11 @@ function mainMenu() {
             if ($c2 === "0") break;
             $idx = (int)$c2 - 1;
             if ($idx < 0 || $idx >= count($list)) continue;
-            passthru("php " . escapeshellarg($list[$idx]["file"]));
+            $script = $list[$idx]["file"];
+            if (stripos(basename($script), "bitcotasks") !== false) {
+                healBitcotasks($script);
+            }
+            passthru("php " . escapeshellarg($script));
             echo WHITE . "Press Enter..." . RESET; fgets(STDIN);
         }
     }
