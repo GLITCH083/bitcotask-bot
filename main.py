@@ -121,7 +121,7 @@ def action_run_script() -> None:
         idx = int(choice) - 1
         path = files[idx]
     except (ValueError, IndexError):
-        print(_c("red", "  Invalid")
+        print(_c("red", "  Invalid"))
         return
     print(_c("cyan", f"\n  Running {path.name} …\n"))
     import runpy
@@ -157,7 +157,6 @@ def build_menu() -> Menu:
 
 
 def main() -> None:
-    # quiet default log until a bot starts
     logging.basicConfig(
         level=logging.WARNING,
         format="%(asctime)s | %(levelname)-7s | %(message)s",
