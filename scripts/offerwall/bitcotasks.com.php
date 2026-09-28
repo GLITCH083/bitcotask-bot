@@ -3,12 +3,7 @@
 /**
  * BitcoTasks.com — offerwall PTC via Vernuable bitcotask
  *
- * Accounts: configs/bitcotasks.com-config/accounts
- * Format: name|publisher_key|sub_id|proxy
- *
- * Claims: number, or 0 = unlimited
- *
- * @version 1.2.0
+ * @version 1.3.0
  */
 
 error_reporting(0);
@@ -17,11 +12,40 @@ require_once dirname(__DIR__, 2) . "/functions/vernuable.php";
 
 define("HOST", "bitcotasks.com");
 define("BASE", "https://bitcotasks.com");
-define("MIN_GIF_BYTES", 800); // real motion GIF is almost never under 1KB
+define("MIN_GIF_BYTES", 800);
 
 enableCtrlC();
 
 $UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+/* ── continuous single status box ─────────────────────────── */
+$_LOG_OPEN = false;
+
+function logStart($title) {
+    global $_LOG_OPEN;
+    if ($_LOG_OPEN) {
+        themeClose();
+    }
+    themeOpen($title);
+    $_LOG_OPEN = true;
+}
+
+function logLine($label, $value) {
+    global $_LOG_OPEN;
+    if (!$_LOG_OPEN) {
+        themeOpen("STATUS");
+        $_LOG_OPEN = true;
+    }
+    themeRow($label, $value);
+}
+
+function logEnd() {
+    global $_LOG_OPEN;
+    if ($_LOG_OPEN) {
+        themeClose();
+        $_LOG_OPEN = false;
+    }
+}
 
 function accountsFile() {
     return configPath(HOST, "accounts");
@@ -146,16 +170,11 @@ function makeNotifCookies() {
     ];
 }
 
-/**
- * Decode preload into raw GIF bytes. Handles data-URI, raw b64, URL.
- */
 function extractGifFromPreload($preload, $proxy = null, $jar = null) {
     if (!is_string($preload) || $preload === "") {
         return null;
     }
     $preload = trim($preload);
-
-    // URL → download
     if (preg_match('#^https?://#i', $preload) || preg_match('#^//#', $preload)) {
         $url = (strpos($preload, "//") === 0) ? "https:" . $preload : $preload;
         list($code, $bin) = httpRequest($url, "GET", null, [], $proxy, $jar);
@@ -164,45 +183,28 @@ function extractGifFromPreload($preload, $proxy = null, $jar = null) {
         }
         return null;
     }
-
-    // data:image/gif;base64,XXXX
     if (stripos($preload, "base64,") !== false) {
         $parts = explode("base64,", $preload, 2);
-        $b64 = preg_replace('/\s+/', '', $parts[1]);
-        $bin = base64_decode($b64, false);
+        $bin = base64_decode(preg_replace('/\s+/', '', $parts[1]), false);
         if ($bin !== false && strlen($bin) > 50) {
             return $bin;
         }
     }
-
-    // pure base64 (GIF magic in b64 = R0lGOD)
-    $clean = preg_replace('/\s+/', '', $preload);
-    // strip accidental quotes
-    $clean = trim($clean, "\"'");
+    $clean = trim(preg_replace('/\s+/', '', $preload), "\"'");
     $bin = base64_decode($clean, false);
     if ($bin !== false && strlen($bin) > 50) {
         return $bin;
     }
-
-    // already binary?
     if (substr($preload, 0, 3) === "GIF") {
         return $preload;
     }
-
     return null;
 }
 
 function isValidGif($bin) {
-    if (!is_string($bin) || strlen($bin) < MIN_GIF_BYTES) {
-        return false;
-    }
-    // GIF87a / GIF89a
-    return substr($bin, 0, 3) === "GIF";
+    return is_string($bin) && strlen($bin) >= MIN_GIF_BYTES && substr($bin, 0, 3) === "GIF";
 }
 
-/**
- * POST captcha endpoint → JSON + GIF bytes
- */
 function fetchCaptchaChallenge($capUrl, $proxy, $jar) {
     list($code, $jraw) = httpRequest(
         $capUrl,
@@ -218,28 +220,16 @@ function fetchCaptchaChallenge($capUrl, $proxy, $jar) {
         $proxy,
         $jar
     );
-
     $j = json_decode($jraw, true);
     if (!is_array($j)) {
-        return [null, null, "bad JSON HTTP $code: " . substr((string)$jraw, 0, 80)];
+        return [null, null, "bad JSON HTTP $code"];
     }
-
-    // try multiple possible fields
     $candidates = [];
     foreach (["preload", "image", "gif", "img", "data", "captcha", "body"] as $k) {
         if (!empty($j[$k]) && is_string($j[$k])) {
             $candidates[] = $j[$k];
         }
     }
-    // nested
-    if (isset($j["result"]) && is_array($j["result"])) {
-        foreach (["preload", "image", "gif"] as $k) {
-            if (!empty($j["result"][$k]) && is_string($j["result"][$k])) {
-                $candidates[] = $j["result"][$k];
-            }
-        }
-    }
-
     $gif = null;
     foreach ($candidates as $c) {
         $try = extractGifFromPreload($c, $proxy, $jar);
@@ -247,70 +237,140 @@ function fetchCaptchaChallenge($capUrl, $proxy, $jar) {
             $gif = $try;
             break;
         }
-        // keep largest attempt even if under threshold (for error msg)
         if ($try && (!$gif || strlen($try) > strlen($gif))) {
             $gif = $try;
         }
     }
-
     return [$gif, $j, null];
 }
 
 /**
- * Submit solved x,y click to BitcoTasks captcha endpoint, then validate firewall.
- * Returns [offerPath, offerToken] or [null, null] on fail.
+ * Try multiple submit formats until captcha accepts click.
+ * Returns [ok(bool), responseJson, raw, usedStrategy]
  */
-function submitCaptchaAndValidate($capUrl, $meta, $x, $y, $key, $sub, $proxy, $jar, $html) {
-    $cdata = $meta["cdata"] ?? $meta["h"] ?? null;
-    $coords = json_encode([(int)$x, (int)$y]);
-    $body = [
-        "action" => "data",
-        "x"      => (int)$x,
-        "y"      => (int)$y,
-        "coords" => $coords,
-        "point"  => $coords,
-    ];
-    // some builds use obfuscated field names mirrored from response keys
-    if (!empty($meta["fields"]) && is_array($meta["fields"])) {
-        foreach ($meta["fields"] as $fk => $fv) {
-            if (is_string($fk) && $fk !== "") {
-                $body[$fk] = $fv;
-            }
-        }
-    }
-
-    $params = "action=data";
-    if ($cdata) {
-        $params .= "&cdata=" . urlencode($cdata);
-    }
+function submitCaptchaClick($capUrl, $meta, $x, $y, $index, $proxy, $jar) {
     $capBase = explode("?", $capUrl)[0];
+    $h = $meta["h"] ?? $meta["cdata"] ?? $meta["token"] ?? "";
+    $refZone = $meta["refZone"] ?? null;
+    $w = $meta["w"] ?? null;
 
-    list($sc, $sraw) = httpRequest($capBase . "?" . $params, "POST", $body, [
-        "Content-Type: application/x-www-form-urlencoded",
-        "X-Requested-With: XMLHttpRequest",
-    ], $proxy, $jar);
+    $xi = (int)$x;
+    $yi = (int)$y;
 
-    $sj = json_decode($sraw, true) ?: [];
-    themeBox("📤  SUBMIT CLICK", [
-        "HTTP"   => (string)$sc,
-        "Coords" => GREEN . "$x, $y" . RESET,
-        "Resp"   => substr(is_string($sraw) ? $sraw : json_encode($sj), 0, 40),
-    ]);
+    // Strategies: [queryAction, bodyType json|form, body payload]
+    $strategies = [];
 
-    // token for firewall validate
-    $token = $meta["token"] ?? $sj["token"] ?? null;
-    if (!$token) {
-        foreach (array_merge($meta, $sj) as $v) {
-            if (is_string($v) && strlen($v) >= 32 && preg_match('/^[0-9a-f]+$/i', $v)) {
-                $token = $v;
-                break;
+    // JSON bodies (same style as challenge fetch which uses JSON)
+    foreach (["check", "verify", "click", "solve", "answer", "data"] as $act) {
+        $payload = ["x" => $xi, "y" => $yi];
+        if ($h !== "") {
+            $payload["h"] = $h;
+        }
+        if ($index !== null) {
+            $payload["index"] = (int)$index;
+            $payload["answer"] = (int)$index;
+        }
+        if ($refZone !== null) {
+            $payload["refZone"] = $refZone;
+        }
+        if ($w !== null) {
+            $payload["w"] = $w;
+        }
+        $strategies[] = [$act, "json", $payload];
+    }
+
+    // Form-urlencoded variants
+    foreach (["check", "verify", "click", "data"] as $act) {
+        $payload = [
+            "x" => $xi,
+            "y" => $yi,
+            "coords" => json_encode([$xi, $yi]),
+            "point"  => json_encode([$xi, $yi]),
+        ];
+        if ($h !== "") {
+            $payload["h"] = $h;
+            $payload["cdata"] = $h;
+        }
+        if ($index !== null) {
+            $payload["index"] = (int)$index;
+        }
+        $strategies[] = [$act, "form", $payload];
+    }
+
+    // JSON with only h + index (icon pick style)
+    if ($index !== null && $h !== "") {
+        $strategies[] = ["check", "json", ["h" => $h, "index" => (int)$index]];
+        $strategies[] = ["verify", "json", ["h" => $h, "index" => (int)$index]];
+        $strategies[] = ["check", "form", ["h" => $h, "index" => (int)$index]];
+    }
+
+    foreach ($strategies as $i => $st) {
+        list($act, $type, $payload) = $st;
+        $url = $capBase . "?action=" . urlencode($act);
+        if ($type === "json") {
+            list($code, $raw) = httpRequest($url, "POST", json_encode($payload), [
+                "Content-Type: application/json",
+                "X-Requested-With: XMLHttpRequest",
+            ], $proxy, $jar);
+        } else {
+            list($code, $raw) = httpRequest($url, "POST", $payload, [
+                "Content-Type: application/x-www-form-urlencoded",
+                "X-Requested-With: XMLHttpRequest",
+            ], $proxy, $jar);
+        }
+
+        $j = json_decode($raw, true) ?: [];
+        $msg = (string)($j["message"] ?? "");
+
+        // hard reject → try next
+        if (stripos($msg, "Invalid action") !== false) {
+            continue;
+        }
+
+        // success signals
+        $ok = false;
+        if (isset($j["status"]) && (string)$j["status"] === "success") {
+            $ok = true;
+        }
+        if (isset($j["success"]) && $j["success"]) {
+            $ok = true;
+        }
+        if (!empty($j["token"]) && is_string($j["token"])) {
+            $ok = true;
+        }
+        if (!empty($j["redirect"])) {
+            $ok = true;
+        }
+        // any non-false boolean-looking random key with true
+        foreach ($j as $k => $v) {
+            if (is_bool($v) && $v === true && $k !== "success") {
+                $ok = true;
+            }
+            if (is_string($v) && strlen($v) >= 32 && preg_match('/^[0-9a-f]+$/i', $v) && !in_array($k, ["h", "preload", "image"], true)) {
+                $ok = true;
             }
         }
-    }
-    if (!$token) {
-        $token = "";
+        // not an explicit failure message
+        if ($ok || ($code === 200 && $msg === "" && !empty($j) && stripos($msg, "invalid") === false && stripos($msg, "fail") === false && stripos($msg, "error") === false)) {
+            // still reject pure error objects
+            if (isset($j["status"]) && (string)$j["status"] === "error") {
+                continue;
+            }
+            if (stripos($msg, "Invalid") !== false || stripos($msg, "wrong") !== false || stripos($msg, "fail") !== false) {
+                // keep trying unless we got a token
+                if (empty($j["token"])) {
+                    continue;
+                }
+            }
+            return [true, $j, $raw, "$act/$type"];
+        }
     }
 
+    // return last attempt info
+    return [false, $j ?? [], $raw ?? "", "all-failed"];
+}
+
+function validateFirewall($key, $sub, $token, $proxy, $jar, $html) {
     list($cv, $vraw) = httpRequest(
         BASE . "/firewall.php?key=" . urlencode($key) . "&sub_id=" . urlencode($sub),
         "POST",
@@ -321,23 +381,10 @@ function submitCaptchaAndValidate($capUrl, $meta, $x, $y, $key, $sub, $proxy, $j
     );
     $vj = json_decode($vraw, true) ?: [];
     $offerPath = $vj["redirect"] ?? $vj["url"] ?? null;
-
     if (!$offerPath && preg_match('#(/offerwall/[^"\'\s]+)#i', (string)$vraw . (string)$html, $om)) {
         $offerPath = $om[1];
     }
-
-    themeBox("🔓  VALIDATE", [
-        "HTTP"     => (string)$cv,
-        "Redirect" => $offerPath ? GREEN . substr($offerPath, 0, 40) . RESET : RED . "none" . RESET,
-        "Resp"     => substr((string)$vraw, 0, 40),
-    ]);
-
-    if (!$offerPath) {
-        return [null, null];
-    }
-    $parts = explode("/", rtrim($offerPath, "/"));
-    $offerToken = end($parts);
-    return [$offerPath, $offerToken];
+    return [$offerPath, $vj, $vraw, $cv];
 }
 
 function runAccount($acc, $claims = 5) {
@@ -346,46 +393,40 @@ function runAccount($acc, $claims = 5) {
     $sub   = $acc["sub_id"];
     $proxy = $acc["proxy"] ?? null;
     $jar   = configPath(HOST, "cookie_" . preg_replace("/[^a-z0-9]/i", "_", $name) . ".txt");
-
     $claimsLabel = ($claims === 0) ? "UNLIMITED" : (string)$claims;
 
-    themeBox("👤  ACCOUNT", [
-        "Name"   => GREEN . $name . RESET,
-        "sub_id" => $sub,
-        "Proxy"  => $proxy ? CYAN . substr($proxy, 0, 40) . RESET : GREY . "DIRECT" . RESET,
-        "Claims" => YELLOW . $claimsLabel . RESET,
-    ]);
+    logStart("▶  RUN · $name");
+    logLine("Account", GREEN . $name . RESET);
+    logLine("sub_id", $sub);
+    logLine("Proxy", $proxy ? CYAN . substr($proxy, 0, 40) . RESET : GREY . "DIRECT" . RESET);
+    logLine("Claims", YELLOW . $claimsLabel . RESET);
 
     $vkey = vernuable_key();
     if ($vkey === "") {
-        logFail("Vernuable", "API key empty — set it from main menu");
+        logLine("Error", RED . "Vernuable API key empty" . RESET);
+        logEnd();
         return;
     }
     $bal = vernuable_balance();
-    themeBox("💰  VERNUABLE", [
-        "Balance" => $bal !== null ? GREEN . "$" . number_format($bal, 5) . RESET : RED . "n/a" . RESET,
-        "Key"     => substr($vkey, 0, 6) . "…" . substr($vkey, -4),
-    ]);
+    logLine("Vernuable", $bal !== null ? GREEN . "$" . number_format($bal, 5) . RESET : RED . "n/a" . RESET);
     if ($bal !== null && $bal <= 0) {
-        logFail("Vernuable", "ZERO_BALANCE — deposit on vernuable.my.id");
+        logLine("Error", RED . "ZERO_BALANCE" . RESET);
+        logEnd();
         return;
     }
 
     list($code, $html) = httpRequest(
         BASE . "/firewall.php?key=" . urlencode($key) . "&sub_id=" . urlencode($sub),
-        "GET",
-        null,
-        [],
-        $proxy,
-        $jar
+        "GET", null, [], $proxy, $jar
     );
     if ($code >= 400 || $html === false || $html === "") {
-        logFail("Firewall", "HTTP $code");
+        logLine("Firewall", RED . "HTTP $code" . RESET);
+        logEnd();
         return;
     }
 
-    $capUrl     = null;
-    $offerPath  = null;
+    $capUrl = null;
+    $offerPath = null;
     $offerToken = null;
 
     if (preg_match('#(/captcha2/[a-f0-9]{32,}\.js)\?action=captcha#i', $html, $m)) {
@@ -395,97 +436,87 @@ function runAccount($acc, $claims = 5) {
     }
 
     if ($capUrl) {
-        themeBox("🛡️  FIREWALL", [
-            "Status"  => YELLOW . "Captcha required" . RESET,
-            "Cap URL" => GREY . substr($capUrl, 0, 45) . RESET,
-        ]);
+        logLine("Firewall", YELLOW . "captcha required" . RESET);
+        logLine("CapURL", GREY . substr($capUrl, 0, 42) . RESET);
 
         $solved = null;
-        $meta   = [];
+        $meta = [];
         $maxTries = 4;
 
         for ($try = 1; $try <= $maxTries; $try++) {
             list($gif, $j, $err) = fetchCaptchaChallenge($capUrl, $proxy, $jar);
-            if ($err) {
-                themeBox("📥  CAPTCHA FETCH", [
-                    "Try"    => "$try/$maxTries",
-                    "Status" => RED . "Failed" . RESET,
-                    "Detail" => substr($err, 0, 40),
-                ]);
+            if ($err || !isValidGif($gif)) {
+                logLine("Fetch#$try", RED . ($err ?: ("bad GIF " . ($gif ? strlen($gif) : 0) . "B")) . RESET);
                 sleep(2);
                 continue;
             }
+            $meta = $j;
+            logLine("Fetch#$try", GREEN . strlen($gif) . "B GIF89a OK" . RESET);
+            logLine("Keys", substr(implode(",", array_keys($j)), 0, 42));
 
-            $keys = is_array($j) ? implode(",", array_slice(array_keys($j), 0, 8)) : "-";
-            $gsize = $gif ? strlen($gif) : 0;
-            $magic = ($gif && strlen($gif) >= 6) ? substr($gif, 0, 6) : "-";
-
-            themeBox("📥  CAPTCHA FETCH", [
-                "Try"    => "$try/$maxTries",
-                "Keys"   => substr($keys, 0, 42),
-                "GIF"    => $gsize . " bytes",
-                "Magic"  => $magic,
-            ]);
-
-            if (!isValidGif($gif)) {
-                themeBox("⚠️  GIF INVALID", [
-                    "Size"   => (string)$gsize,
-                    "Need"   => ">= " . MIN_GIF_BYTES . " + GIF header",
-                    "Action" => "retry fetch",
-                ]);
-                sleep(2);
-                continue;
-            }
-
-            themeBox("🤖  VERNUABLE", [
-                "Action" => YELLOW . "Solving bitcotask…" . RESET,
-                "GIF"    => $gsize . " bytes",
-                "Try"    => "$try/$maxTries",
-            ]);
-
+            logLine("Solve", YELLOW . "Vernuable bitcotask…" . RESET);
             $solved = vernuable_solve_bitcotask($gif, 180, 2);
-
             if ($solved && isset($solved["x"])) {
+                logLine("Solved", GREEN . ((int)$solved["x"] . "," . (int)$solved["y"])
+                    . (isset($solved["index"]) ? " idx=" . $solved["index"] : "") . RESET);
                 break;
             }
-
-            $detail = is_array($solved) && isset($solved["error"])
-                ? $solved["error"]
-                : "solve failed";
-
-            themeBox("❌  VERNUABLE", [
-                "Status" => RED . "Failed" . RESET,
-                "Detail" => substr($detail, 0, 42),
-                "Try"    => "$try/$maxTries",
-            ]);
-
-            // fresh challenge on unsolvable
+            $detail = is_array($solved) && isset($solved["error"]) ? $solved["error"] : "fail";
+            logLine("Solve#$try", RED . substr($detail, 0, 40) . RESET);
             sleep(2);
             $solved = null;
-            $meta = $j ?: [];
         }
 
         if (!$solved || !isset($solved["x"])) {
-            logFail("Vernuable", "all $maxTries tries failed");
+            logLine("Error", RED . "all solve tries failed" . RESET);
+            logEnd();
             return;
         }
 
-        $meta = $j ?: $meta;
         $x = (int)round($solved["x"]);
         $y = (int)round($solved["y"]);
+        $index = isset($solved["index"]) ? (int)$solved["index"] : null;
 
-        themeBox("🔐  CAPTCHA SOLVED", [
-            "Click"  => GREEN . "$x, $y" . RESET,
-            "Index"  => isset($solved["index"]) ? (string)$solved["index"] : "-",
-            "Action" => YELLOW . "Submitting click…" . RESET,
-        ]);
+        logLine("Submit", YELLOW . "trying check/verify/click…" . RESET);
+        list($ok, $sj, $sraw, $strategy) = submitCaptchaClick($capUrl, $meta, $x, $y, $index, $proxy, $jar);
+        logLine("Strategy", $strategy);
+        logLine("ClickResp", substr(is_string($sraw) ? $sraw : json_encode($sj), 0, 42));
 
-        list($offerPath, $offerToken) = submitCaptchaAndValidate(
-            $capUrl, $meta, $x, $y, $key, $sub, $proxy, $jar, $html
-        );
+        if (!$ok) {
+            logLine("Error", RED . "click rejected by captcha" . RESET);
+            logEnd();
+            return;
+        }
+        logLine("Click", GREEN . "accepted" . RESET);
+
+        // token for firewall
+        $token = $sj["token"] ?? $meta["token"] ?? null;
+        if (!$token) {
+            foreach (array_merge($meta, $sj) as $v) {
+                if (is_string($v) && strlen($v) >= 32 && preg_match('/^[0-9a-f]+$/i', $v)) {
+                    $token = $v;
+                    break;
+                }
+            }
+        }
+        // sometimes success response embeds redirect already
+        if (!empty($sj["redirect"])) {
+            $offerPath = $sj["redirect"];
+            $parts = explode("/", rtrim($offerPath, "/"));
+            $offerToken = end($parts);
+            logLine("Redirect", GREEN . substr($offerPath, 0, 40) . RESET);
+        } else {
+            list($offerPath, $vj, $vraw, $cv) = validateFirewall($key, $sub, $token ?: "", $proxy, $jar, $html);
+            logLine("Validate", $offerPath ? GREEN . "OK" . RESET : RED . substr((string)$vraw, 0, 36) . RESET);
+            if ($offerPath) {
+                $parts = explode("/", rtrim($offerPath, "/"));
+                $offerToken = end($parts);
+            }
+        }
 
         if (!$offerPath) {
-            logFail("Validate", "no offerwall redirect after click");
+            logLine("Error", RED . "no offerwall redirect" . RESET);
+            logEnd();
             return;
         }
     } else {
@@ -493,19 +524,12 @@ function runAccount($acc, $claims = 5) {
             $offerPath = $om[1];
             $parts = explode("/", rtrim($offerPath, "/"));
             $offerToken = end($parts);
-            themeBox("🛡️  FIREWALL", [
-                "Status" => GREEN . "Already clear" . RESET,
-                "Path"   => substr($offerPath, 0, 45),
-            ]);
+            logLine("Firewall", GREEN . "already clear" . RESET);
         } else {
-            logFail("Firewall", "no captcha / no offerwall path");
+            logLine("Error", RED . "no captcha / no offerwall" . RESET);
+            logEnd();
             return;
         }
-    }
-
-    if (!$offerPath) {
-        logFail("Offerwall", "no path");
-        return;
     }
 
     $offerUrl = (strpos($offerPath, "http") === 0)
@@ -516,11 +540,8 @@ function runAccount($acc, $claims = 5) {
     if (preg_match('/token["\']?\s*[:=]\s*["\']([a-f0-9]{32,})["\']/i', $ohtml, $tm)) {
         $offerToken = $tm[1];
     }
-
-    themeBox("📋  OFFERWALL", [
-        "URL"   => GREY . substr($offerUrl, 0, 45) . RESET,
-        "Token" => $offerToken ? substr($offerToken, 0, 16) . "…" : "-",
-    ]);
+    logLine("Offerwall", GREY . substr($offerUrl, 0, 42) . RESET);
+    logEnd();
 
     $ok = 0;
     $fail = 0;
@@ -534,21 +555,19 @@ function runAccount($acc, $claims = 5) {
         }
 
         list($cs, $sraw) = httpRequest($offerUrl, "POST", [
-            "token"  => $offerToken,
+            "token" => $offerToken,
             "action" => "switch_cat",
-            "type"   => "ptc",
+            "type" => "ptc",
         ], ["X-Requested-With: XMLHttpRequest"], $proxy, $jar);
         $sj = json_decode($sraw, true) ?: [];
         $items = $sj["items"] ?? $sj["data"] ?? [];
 
         if (empty($items) || !is_array($items)) {
             $emptyStreak++;
-            themeBox("📭  PTC", [
-                "Status" => YELLOW . "No items" . RESET,
-                "Streak" => (string)$emptyStreak,
-            ]);
+            logStart("PTC");
+            logLine("Items", YELLOW . "none (streak $emptyStreak)" . RESET);
+            logEnd();
             if ($emptyStreak >= 3) {
-                themeBox("⏹  STOP", ["Reason" => "no more ads"]);
                 break;
             }
             sleep(5);
@@ -570,28 +589,26 @@ function runAccount($acc, $claims = 5) {
             $item = $items[0];
         }
 
-        $label = ($claims === 0) ? "#$i (∞)" : "#$i/$claims";
-        themeBox("🎯  CLAIM $label", [
-            "Reward" => YELLOW . ($item["reward"] ?? "?") . RESET,
-            "Dur"    => ($item["duration"] ?? "?") . "s",
-            "Hash"   => substr((string)($item["hash"] ?? ""), 0, 16),
-        ]);
+        $label = ($claims === 0) ? "#$i ∞" : "#$i/$claims";
+        logStart("CLAIM $label");
+        logLine("Reward", YELLOW . ($item["reward"] ?? "?") . RESET);
+        logLine("Duration", ($item["duration"] ?? "?") . "s");
 
         list($ci, $iraw) = httpRequest($offerUrl, "POST", [
-            "token"  => $offerToken,
+            "token" => $offerToken,
             "action" => "init_transaction",
-            "hash"   => $item["hash"] ?? "",
-            "sid"    => $item["sid"] ?? $sub,
-            "key"    => $item["key"] ?? $key,
-            "type"   => $item["type"] ?? "ptc",
+            "hash" => $item["hash"] ?? "",
+            "sid" => $item["sid"] ?? $sub,
+            "key" => $item["key"] ?? $key,
+            "type" => $item["type"] ?? "ptc",
         ], ["X-Requested-With: XMLHttpRequest"], $proxy, $jar);
         $ij = json_decode($iraw, true) ?: [];
         $lead = $ij["offer"] ?? $ij["url"] ?? $ij["link"] ?? "";
         if (!$lead) {
             $fail++;
-            logFail("init_transaction", substr((string)$iraw, 0, 100));
+            logLine("Init", RED . substr((string)$iraw, 0, 40) . RESET);
+            logEnd();
             if ($fail >= 8) {
-                themeBox("⏹  STOP", ["Reason" => "too many fails"]);
                 break;
             }
             sleep(3);
@@ -611,17 +628,18 @@ function runAccount($acc, $claims = 5) {
         ], $proxy, $jar);
 
         $wait = max((float)($item["duration"] ?? 2), 2) + (mt_rand(3, 12) / 10);
-        logWait("viewing", (int)$wait);
+        logLine("View", YELLOW . (int)$wait . "s" . RESET);
+        logEnd();
         sleep((int)$wait);
 
         $tokenLead = basename(parse_url($lead, PHP_URL_PATH) ?: rtrim($lead, "/"));
         list($cp, $praw) = httpRequest(BASE . "/system/ajax.php", "POST", [
-            "hash"   => $item["hash"] ?? "",
+            "hash" => $item["hash"] ?? "",
             "sub_id" => $item["sid"] ?? $sub,
-            "key"    => $item["key"] ?? $key,
-            "token"  => $tokenLead,
+            "key" => $item["key"] ?? $key,
+            "token" => $tokenLead,
             "action" => "proccessLead",
-            "atxrN"  => "",
+            "atxrN" => "",
         ], [
             "X-Requested-With: XMLHttpRequest",
             "Cookie: " . $cookieHdr,
@@ -632,31 +650,33 @@ function runAccount($acc, $claims = 5) {
             || stripos((string)($pj["message"] ?? ""), "SUCCESS") !== false
             || stripos((string)($pj["msg"] ?? ""), "SUCCESS") !== false;
 
+        logStart("RESULT $label");
         if ($success) {
             $ok++;
             $fail = 0;
-            themeBox("✅  CLAIM OK", [
-                "Reward" => GREEN . ($item["reward"] ?? "") . RESET,
-                "Msg"    => substr((string)($pj["message"] ?? $pj["msg"] ?? "OK"), 0, 40),
-                "Total"  => GREEN . (string)$ok . RESET,
-            ]);
+            logLine("Status", GREEN . "OK" . RESET);
+            logLine("Reward", GREEN . ($item["reward"] ?? "") . RESET);
+            logLine("Total", GREEN . (string)$ok . RESET);
         } else {
             $fail++;
-            logFail("Lead", substr((string)$praw, 0, 120));
+            logLine("Status", RED . "FAIL" . RESET);
+            logLine("Detail", substr((string)$praw, 0, 40));
             if ($fail >= 8) {
-                themeBox("⏹  STOP", ["Reason" => "too many fails"]);
+                logLine("Stop", RED . "too many fails" . RESET);
+                logEnd();
                 break;
             }
         }
+        logEnd();
         sleep(mt_rand(2, 5));
     }
 
-    themeBox("📊  SUMMARY", [
-        "Account" => $name,
-        "OK"      => GREEN . $ok . RESET,
-        "Fail"    => RED . $fail . RESET,
-        "Mode"    => $claims === 0 ? YELLOW . "unlimited" . RESET : (string)$claims,
-    ]);
+    logStart("SUMMARY");
+    logLine("Account", $name);
+    logLine("OK", GREEN . $ok . RESET);
+    logLine("Fail", RED . $fail . RESET);
+    logLine("Mode", $claims === 0 ? YELLOW . "unlimited" . RESET : (string)$claims);
+    logEnd();
 }
 
 while (true) {
