@@ -1,10 +1,11 @@
+configs/**/*
+!configs/.gitkeep
+github_token.txt
+temp_update/
+bot.php.bak
+*.log
 config.json
-data/accounts/*.json
-!data/accounts/.gitkeep
 __pycache__/
 *.pyc
 .env
 .venv/
-venv/
-*.log
-.DS_Store
