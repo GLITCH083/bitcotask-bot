@@ -1,13 +1,12 @@
 {
-  "version": "1.4.0",
+  "version": "1.4.1",
   "name": "VernuableOfficialScripts",
   "whats_new": [
-    "HAR-accurate captcha flow from real browser capture",
-    "Parse captcha JS for submit path (/captcha2/XXXX?action=data&cdata=) and field names",
-    "Use image field (full GIF) not tiny preload",
-    "Submit form: STATIC=VAL&COORDS=[x,y] exactly as browser",
-    "Validate with action=validate&UEjS=token only",
-    "Reject clicks with x < refZone"
+    "STRICT: only accept click if response[success_key] from JS is truthy",
+    "STRICT: token only from response[token_key] (e.g. ecJQSy) not any random hex",
+    "Wait >=900ms after challenge before submit (tooFast guard)",
+    "Fresh _bitco_notifad cookies every lead from start_view through processLead",
+    "Fresh PHPSESSID cookie jar each run"
   ],
   "updated": "2026-09-29",
   "repo": "GLITCH083/bitcotask-bot"
