@@ -2,11 +2,11 @@
   "version": "1.4.6",
   "name": "VernuableOfficialScripts",
   "whats_new": [
-    "Claim: notif cookies _bitco_notifad in jar from START + every lead",
-    "Claim: GET lead then start_view then proccessLead (HAR)",
-    "Keep PHPSESSID with notif (no Cookie header wipe)",
+    "Claim: _bitco_notifad in cookie JAR from START + every lead",
+    "Claim HAR: GET lead -> start_view -> wait -> proccessLead",
+    "Never wipe PHPSESSID with Cookie header",
     "Detect captcha on lead page",
-    "Full ProcBody log on result"
+    "Replace bitcotasks.com.php with the download from chat if update is truncated"
   ],
   "updated": "2026-09-29",
   "repo": "GLITCH083/bitcotask-bot"
