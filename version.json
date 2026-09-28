@@ -1,13 +1,13 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "VernuableOfficialScripts",
   "whats_new": [
-    "FIX Vernuable bitcotask: JSON body + image param (official docs)",
-    "FIX parse x,y from request JSON string + top-level fields",
-    "Show real Vernuable error (ZERO_BALANCE, UNSOLVABLE, etc)",
-    "Unlimited claims: enter 0 when asked for claims count",
-    "Better GIF extract + balance check before solve",
-    "Stop after 3 empty PTC / 8 fails in a row"
+    "All status lines in theme boxes (no plain text)",
+    "Captcha: show Cap URL / GIF size / keys / magic in boxes",
+    "Reject tiny GIFs (<800B) — was causing UNSOLVABLE",
+    "Retry captcha fetch + Vernuable up to 4 times",
+    "Submit click AFTER solve, then validate (shown in boxes)",
+    "Better preload extract (data-URI / b64 / URL)"
   ],
   "updated": "2026-09-29",
   "repo": "GLITCH083/bitcotask-bot"
