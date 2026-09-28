@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "name": "VernuableOfficialScripts",
+  "whats_new": [
+    "Main bot.php menu (Buxads-style)",
+    "GitHub Check for Updates",
+    "Vernuable method=bitcotask solver",
+    "BitcoTasks offerwall multi-account",
+    "Configs via saveData (no accounts.example.json)",
+    "Proxy per account support"
+  ],
+  "updated": "2026-09-28",
+  "repo": "GLITCH083/bitcotask-bot"
+}
