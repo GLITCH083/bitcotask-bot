@@ -2,9 +2,9 @@
   "version": "1.4.5",
   "name": "VernuableOfficialScripts",
   "whats_new": [
-    "SINGLE plain bitcotasks.com.php — NO parts, NO gzdecode",
-    "Dynamic validate field from captcha JS",
-    "Update + Clean junk removes patch_*.php and *.b64"
+    "SINGLE entry bitcotasks.com.php (no part1/part2.b64)",
+    "Internal chunks _c0-_c4 — Clean junk removes old parts",
+    "Dynamic validate field + strict success_key"
   ],
   "updated": "2026-09-29",
   "repo": "GLITCH083/bitcotask-bot"
