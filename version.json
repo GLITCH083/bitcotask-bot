@@ -1,10 +1,12 @@
 {
-  "version": "1.4.2",
+  "version": "1.4.3",
   "name": "VernuableOfficialScripts",
   "whats_new": [
-    "FIXED: bitcotasks.part1/part2 gzip payload (decode was CRC-corrupted)",
-    "Loader v1.4.2 verified gzdecode → 23730 byte script",
-    "HAR captcha flow + notif cookies + strict success_key/token_key"
+    "Wider box (90 cols) — full Validate body visible",
+    "HAR validate headers: X-Requested-With + charset=UTF-8",
+    "Retry up to 3 tokens from click JSON if first UEjS fails",
+    "Log SuccKey/TokKey/ClickKeys/ValTry/CookieJar (PHPSESSID)",
+    "Fresh cookie jar every run"
   ],
   "updated": "2026-09-29",
   "repo": "GLITCH083/bitcotask-bot"
