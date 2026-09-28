@@ -82,7 +82,7 @@ function parseProxyString($proxy) {
 }
 
 function theme_box_w() {
-    return 61;
+    return 90;
 }
 
 function theme_plain($s) {
@@ -102,8 +102,8 @@ function themeOpen($title) {
 function themeRow($label, $value) {
     $w = theme_box_w();
     $plainV = theme_plain($value);
-    if (strlen($plainV) > 42) {
-        $plainV = substr($plainV, 0, 39) . "...";
+    if (strlen($plainV) > 68) {
+        $plainV = substr($plainV, 0, 65) . "...";
         $value = $plainV;
     }
     $padV = max(1, $w - 16 - strlen($plainV));
