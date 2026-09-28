@@ -1,10 +1,12 @@
 {
-  "version": "1.4.5",
+  "version": "1.4.6",
   "name": "VernuableOfficialScripts",
   "whats_new": [
-    "bitcotasks: 9 internal chunks (no part1/part2.b64)",
-    "Update removes old parts; menu hides _c* and patch_*",
-    "Dynamic validate field from captcha JS"
+    "Claim: notif cookies _bitco_notifad in jar from START + every lead",
+    "Claim: GET lead then start_view then proccessLead (HAR)",
+    "Keep PHPSESSID with notif (no Cookie header wipe)",
+    "Detect captcha on lead page",
+    "Full ProcBody log on result"
   ],
   "updated": "2026-09-29",
   "repo": "GLITCH083/bitcotask-bot"
