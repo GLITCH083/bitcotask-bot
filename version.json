@@ -1,11 +1,13 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "name": "VernuableOfficialScripts",
   "whats_new": [
-    "FIX captcha submit: was action=data → Invalid action",
-    "Now tries check/verify/click/solve with JSON + form (h,x,y,index)",
-    "Single continuous status box (no spam of separate boxes)",
-    "Shows which strategy worked (e.g. check/json)"
+    "HAR-accurate captcha flow from real browser capture",
+    "Parse captcha JS for submit path (/captcha2/XXXX?action=data&cdata=) and field names",
+    "Use image field (full GIF) not tiny preload",
+    "Submit form: STATIC=VAL&COORDS=[x,y] exactly as browser",
+    "Validate with action=validate&UEjS=token only",
+    "Reject clicks with x < refZone"
   ],
   "updated": "2026-09-29",
   "repo": "GLITCH083/bitcotask-bot"
