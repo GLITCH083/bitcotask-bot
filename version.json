@@ -1,13 +1,11 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "name": "VernuableOfficialScripts",
   "whats_new": [
-    "All status lines in theme boxes (no plain text)",
-    "Captcha: show Cap URL / GIF size / keys / magic in boxes",
-    "Reject tiny GIFs (<800B) — was causing UNSOLVABLE",
-    "Retry captcha fetch + Vernuable up to 4 times",
-    "Submit click AFTER solve, then validate (shown in boxes)",
-    "Better preload extract (data-URI / b64 / URL)"
+    "FIX captcha submit: was action=data → Invalid action",
+    "Now tries check/verify/click/solve with JSON + form (h,x,y,index)",
+    "Single continuous status box (no spam of separate boxes)",
+    "Shows which strategy worked (e.g. check/json)"
   ],
   "updated": "2026-09-29",
   "repo": "GLITCH083/bitcotask-bot"
